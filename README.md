@@ -13,6 +13,9 @@ BulkLoader loader = new BulkLoader(@"C:\content.json");
 
 ##Changelog##
 
+Version 0.2: Shows information about bulk process during the operation.
+             Minor exception control
+             
 Version 0.1: Load data. Only tested with Twitter data (Close to 1 GB tweets)
 
 ##Credits##

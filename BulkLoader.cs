@@ -1,9 +1,10 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Net;
 using System.Configuration;
-using System.Threading.Tasks;
-using System.Collections.Generic;
 
 namespace DesappstreStudio.CouchDB.Bulk
 {
@@ -13,6 +14,17 @@ namespace DesappstreStudio.CouchDB.Bulk
     /// </summary>
     public class BulkLoader : object
     {
+        //
+        private long bulk_operations;
+        //
+        private int bulk_errors;
+        //
+        private int block_limit;
+        // 
+        private DateTime init_time;
+        //
+        private static object Sync = new object();
+
         /// <summary>
         /// URL to _bulk_docs operations
         /// </summary>
@@ -30,6 +42,8 @@ namespace DesappstreStudio.CouchDB.Bulk
         public BulkLoader(string file, int limit) : base()
         {
             this.FormatCouchDBURL();
+            this.init_time = DateTime.Now;
+            this.block_limit = limit;
 
             List<string> lines = new List<string>();
             List<Task> tasks = new List<Task>();
@@ -101,7 +115,7 @@ namespace DesappstreStudio.CouchDB.Bulk
         /// <summary>
         /// HTTP Bulk process
         /// </summary>
-        /// <param name="lines"></param>
+        /// <param name="lines">JSON docs to upload</param>
         private void Bulk(List<string> lines)
         {
             HttpWebRequest request = (HttpWebRequest) WebRequest.Create(this.CouchDBURL);
@@ -116,7 +130,6 @@ namespace DesappstreStudio.CouchDB.Bulk
                 documents = string.IsNullOrEmpty(documents) ? line : string.Concat(documents, ", ", line);
             }
 
-            // Format a valid CouchDB bulk JSON document
             string content = string.Concat("{ \"docs\" : [ ", documents, " ] }");
 
             StreamWriter writer = new StreamWriter(request.GetRequestStream());
@@ -125,19 +138,63 @@ namespace DesappstreStudio.CouchDB.Bulk
             writer.Close();
             writer.Dispose();
 
-            HttpWebResponse response = (HttpWebResponse) request.GetResponse();
+            try
+            {
+                HttpWebResponse response = (HttpWebResponse) request.GetResponse();
 
-            StreamReader reader = new StreamReader(response.GetResponseStream());
-            string response_content = reader.ReadToEnd();
+                StreamReader reader = new StreamReader(response.GetResponseStream());
+                string response_content = reader.ReadToEnd();
+            }
+            catch(WebException)
+            {
+                // GetResponse error.
+                Interlocked.Increment(ref bulk_errors);
+            }
 
             // TODO. Process response data
+
+            lock(BulkLoader.Sync)
+            {
+                bulk_operations += lines.Count;
+                this.ShowBulkState();
+            }
         }
+
+        /// <summary>
+        /// Show bulk state info during operations
+        /// </summary>
+        private void ShowBulkState()
+        {            
+            TimeSpan span = (DateTime.Now - init_time);
+
+            if(bulk_operations == block_limit)
+            {
+                string message = string.Format("JSON objects loaded: {0}\r\nBulk operation running: {1}\r\nBulk errors: {2}", bulk_operations.ToString("N0"), span.ToString(), bulk_errors.ToString("N0"));
+                Console.Write(message);
+            }
+            else
+            {
+                Console.CursorTop -= 2;
+                Console.CursorLeft = "JSON objects loaded: ".Length;
+                Console.Write(bulk_operations.ToString("N0"));
+                Console.CursorTop++;
+                Console.CursorLeft = "Bulk operation running: ".Length;
+                Console.Write(span.ToString());
+                Console.CursorTop++;
+                Console.CursorLeft = "Bulk errors: ".Length;
+                Console.Write(bulk_errors.ToString("N0")); 
+            }
+
+        }
+
         /// <summary>
         /// Stating point...
         /// </summary>
         /// <param name="args"></param>
         public static void Main(string[] args)
         {
+            Console.CursorVisible = false;
+
             if(args.Length == 1)
             {
                 if(!File.Exists(args[0]))
@@ -152,7 +209,7 @@ namespace DesappstreStudio.CouchDB.Bulk
             else
             {
                 Environment.Exit(-1);
-            }            
+            }
         }
     }
 }
